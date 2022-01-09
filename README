@@ -1,0 +1,66 @@
+===============================STRUCTURI DE DATE FOLOSITE=========================
+(*) arraylist: 1) MOTIVATIE
+	       - am folosit un ArrayList in loc de un array normal ptr. ca acesta
+	       nu are nevoie de un size stabilit de la inceput si ptr. ca nu este
+               construit sa tina un singur tip de date (are caracter generic)
+(*) tree: 1) MOTIVATIE
+          - am folosit un arbore (o combinatie intre heap si trie, vezi @SURSE) ptr.
+          a tine informatiile din tabela de rutare pentru a reduce timpul LPM-ului
+	  de la O(n) (folosind un array) la un timp constant
+==================================================================================
+
+===============================WORKFLOW===========================================
+(*)PASI: 1) Mai intai verific daca pachetul contine header arp. Daca da, verific
+daca este un arp request si trimit un arp reply pe interfata pe care a venit
+pachetul. Daca este un arp reply, adaug un nou entry in tabela arp a ruterului
+cu datele din reply, scot din coada de adrese care asteapta un arp ptr. a le 
+gasi MAC-urile adresa sursei din reply si trimit pachetele care au ca next hop
+adresa sursei reply-ului.
+	  OBSERVATII: -> cum arp e protocol de layer 2, host-ul nu trimite arp
+request-uri catre interfetele ruterului din alte LAN-uri deci ruterul va raspunde
+doar cu MAC-ul interfetei pe care vine pachetul
+                      -> in cazul topologiei din enunt nu mai este nevoie sa verific
+daca arp request-ul / reply-ul este pentru ruter pentru ca host-urile pot trimite
+reply-uri / request-uri numai ruterului
+                      -> am folosit o coada ptr. a retine adresele ce asteapta un arp
+reply pentru a evita "poluarea" retelei cu mai multe arp request-uri de la ruter in 
+cazul in care nu se primeste un arp reply imediat dupa un pachet a carui adresa destinatie
+nu are un entry in arp table(e.g: h0 incearca sa dea ping pe h2. Pachetul ajunge la ruter,
+nu are un entry in arp table => trimite un arp request catre celalalt ruter. Intre timp
+ajunge alt pachet la ruter, iar acesta inca nu a primit un ARP reply => se va genera inca
+un arp request catre celalalt ruter); de asemenea, daca nu aveam coada respectiva, exista
+posibilitatea sa fie mai multe entry-uri la fel in tabela de rutare daca nu verificam inainte
+de fiecare push
+	 2) Se verifica checksum-ul header-ului ip si se arunca pachetul daca 
+checksum-ul este gresit
+	 OBSERVATII: -> ptr. a verifica checksum-ul am folosit functia ip_checksum
+din fisierul skel.c
+         3) Se verifica daca ttl <= 1. Daca da, se trimite un ICMP_TIME_EXCEEDED catre
+sursa pachetului pe intrerfata pe care a venit si se arunca pachetul
+         4) Se verifica daca se primeste vreun ICMP ECHO REQUEST si daca este pentru una
+din interfetele ruterului si se raspunde cu un ICMP ECHO REPLY pe interfata pe care a venit
+pachetul
+         5) Se face o cautare in tabela de rutare folosind LPM. Daca nu exista nicio ruta, 
+se trimite un ICMP_DEST_UNREACH pe interfata pe care a venit pachetul
+         6) Se decrementeaza ttl-ul, se recalculeaza checksum-ul si se schimba field-ul
+@interface din pachet cu interfata din entry-ul din tabela de rutare.
+         OBSERVATII: -> am schimbat field-ul respectiv ptr. a nu mai face inca o cautare in
+tabela de rutare atunci cand se scot pachetele din coada de asteptare la pasul 1
+         7) Se cauta in tabela arp adresa mac a next hop-ului. Daca se gaseste atunci se poate
+trimite pachetul. Daca nu se gaseste atunci se verifica coada cu adresele care au deja un arp
+request si, daca nu este acolo, se adauga adresa next hop-ului; Se adauga pachetul curent
+in coada de asteptare ptr. pachete ptr. a putea fi trimis mai tarziu cand se primeste un arp
+reply la pasul 1
+=================================================================================
+
+===================================OBSERVATII====================================
+- comanda ping nu arata pachetele ICMP_TIME_EXCEEDED si ICMP_DEST_UNREACH desi
+tcpdump si wireshark arata ca host-ul le primeste
+- pentru verificarea si recalcularea checksum-ului am folosit functia
+@ip_checksum din schelet
+=================================================================================
+
+===================================SURSE=======================================
+[1] Idee arbore
+http://cial.csie.ncku.edu.tw/st2008/pdf/A_Longest_Prefix_First_Search_Tree_for_IP_Lookup.pd
+==============================================================================
